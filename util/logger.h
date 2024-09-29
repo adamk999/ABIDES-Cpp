@@ -1,3 +1,4 @@
+#pragma once
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -7,13 +8,6 @@ class Logger
 private:
     std::ofstream logFile;
     
-    // Destructor to close the log file.
-    ~Logger() {
-        if (logFile.is_open()) 
-        {
-            logFile.close();
-        }
-    }
     
 public:
     // Constructor to open the log file.
@@ -30,5 +24,13 @@ public:
     void log(const std::string& message) 
     {
         logFile << message << std::endl;
+    }
+
+    // Destructor to close the log file.
+    ~Logger() {
+        if (logFile.is_open()) 
+        {
+            logFile.close();
+        }
     }
 };

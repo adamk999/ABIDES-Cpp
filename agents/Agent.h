@@ -1,8 +1,10 @@
 #pragma once
 #include "../util/logger.h"
 #include <vector>
+#include <optional>
 
 class Kernel;
+class Message;
 
 struct LogEntry {
     Timestamp eventTime;
@@ -29,21 +31,23 @@ inline void writeVectorToFile(const std::vector<int>& vec, const std::string& fi
 class Agent {
 private:
     int random_state;
-    Timestamp currentTime;
     bool logToFile;
     std::vector<LogEntry> log;
 
-public:
+protected:
     Kernel* kernel;
-    Logger* logger;
+    Timestamp currentTime;
     int id;
-    std::string name;
-    std::string type;
+    std::optional<std::string> name;
+    std::optional<std::string> type;
 
+public:
+    Logger* logger;
+    
     Agent(
         int id, 
-        std::string name, 
-        std::string type, 
+        std::optional<std::string> name, 
+        std::optional<std::string> type, 
         int random_state, 
         Logger& logger, 
         const bool& logToFile)
@@ -81,23 +85,20 @@ public:
 
         currentTime = new_currentTime;
         logger->log("At " + currentTime.to_string() + " agent " + std::to_string(id) +
-                    name + " received wakeup.");
+                    name.value() + " received wakeup.");
     }
 
-    void receiveMessage(const Timestamp new_currentTime, std::string& msg) {
+    void receiveMessage(const Timestamp new_currentTime, int senderId, const Message* message);
     /* Called each time a message destined for this agent reaches
        the front of the kernel's priority queue. currentTime is
        the simulation time at which the kernel is delivering this
        message -- the agent should treat this as "now". msg is
        an object guaranteed to inherit from the message.Message class. */
 
-    currentTime = new_currentTime;
-    logger->log("At " + new_currentTime.to_string() + ", agent " + std::to_string(id) + name + " received: " + msg);
-    }
 
     void kernelStopping(){
-        /* Called by kernel one time _before_ simulationTerminating.
-           All other agents are guaranteed to exist at this time. */
+    /* Called by kernel one time _before_ simulationTerminating.
+        All other agents are guaranteed to exist at this time. */
     }
 
     void kernelTerminating() {
@@ -125,7 +126,7 @@ public:
 
     void setComputationDelay(const int& requestedDelay);
 
-    void logEvent(std::string eventType, std::string event, bool appendSummaryLog = false) {
+    void logEvent(std::string eventType, std::string event, bool appendSummaryLog = false);
     /* Adds an event to this agent's log.  The deepcopy of the Event field,
        often an object, ensures later state changes to the object will not
        retroactively update the logged event. 
@@ -133,16 +134,6 @@ public:
        We can make a single copy of the object (in case it is an arbitrary
        class instance) for both potential log targets, because we don't
        alter logs once recorded. */
-        LogEntry e;
-        e.event = event;
-        e.eventTime = currentTime;
-        e.eventType = eventType;
-        log.push_back(e);
 
-        if (appendSummaryLog) { kernel->appendSummaryLog(id, eventType, e); }
-    }
-
-    void sendMessage(int recipientID, Message msg, int delay = 0) {
-        kernel->sendMessage(id, recipientID, msg, delay = delay);
-    }
+    void sendMessage(int recipientID, Message msg, int delay = 0);
 };

@@ -1,3 +1,4 @@
+#pragma once
 #include "Agent.h"
 #include <string>
 
@@ -11,10 +12,13 @@
 class FinancialAgent : public Agent {
 
 public:
-    FinancialAgent(int id, std::string name, std::string type, int random_state, Logger& logger, bool log_to_file = true)
+    FinancialAgent(int id, std::optional<std::string> name, std::optional<std::string> type, int random_state, Logger& logger, bool log_to_file = true)
         : Agent(id, name, type, random_state, logger, log_to_file) {}
 
     std::string dollarise(int cents) {
+        /*
+        Used by any subclass to dollarize an int-cents price for printing.
+        */
         return "$" + std::to_string(cents/100) + "." + std::to_string(cents%100);
     }
 };

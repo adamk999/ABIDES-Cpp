@@ -1,19 +1,20 @@
-#pragma once
-#include <tuple>
 #include "TradingAgent.h"
+#include <limits>
 #include "../kernel.h"
 #include "ExchangeAgent.h"
-
+#include "../message/market.h"
+#include "../message/query.h"
+#include "../message/orders.h"
 
 TradingAgent::TradingAgent(
     int id, 
     std::string name, 
     std::string type, 
     int random_state, 
-    const int starting_cash = 100000, 
     Logger& logger,
-    bool log_orders = false,
-    bool log_to_file = true
+    const int starting_cash, 
+    bool log_orders,
+    bool log_to_file
     )
     : FinancialAgent(id, name, type, random_state, logger, log_to_file), 
         log_orders(log_orders), starting_cash(starting_cash) {
@@ -21,7 +22,7 @@ TradingAgent::TradingAgent(
         mkt_close = Timestamp();
 
         // TradingAgent has constants to support simulated market orders.
-        MKT_BUY = pow(10, 10);
+        MKT_BUY = std::numeric_limits<int>::max();;
         MKT_SELL = 0;
 
         /* The base TradingAgent will track its holdings and outstanding orders.
@@ -43,7 +44,7 @@ TradingAgent::TradingAgent(
         mkt_closed = false;
 }
 
-void TradingAgent::kernelStarting(const int& startTime) {
+void TradingAgent::kernelStarting(const Timestamp& startTime) {
     // kernel is set in Agent.kernelInitializing().
     logEvent("STARTING_CASH", std::to_string(starting_cash), true);
 
@@ -94,15 +95,15 @@ bool TradingAgent::wakeup(const Timestamp currentTime) {
     Agent::wakeup(currentTime);
 
     if (first_wake) {
-      // Log initial holdings.
-      logEvent("HOLDINGS_UPDATED", fmtHoldings(holdings));
-      first_wake = false;
+        // Log initial holdings.
+        logEvent("HOLDINGS_UPDATED", fmtHoldings(holdings));
+        first_wake = false;
+        sendMessage(exchangeID, MarketClosePriceRequestMsg());
     }
 
     if (not mkt_open.isValid()) {
-      // Ask our exchange when it opens and closes.
-      sendMessage(exchangeID, Message(id, "WHEN_MKT_OPEN"));
-      sendMessage(exchangeID, Message(id, "WHEN_MKT_CLOSE"));
+        // Ask our exchange when it opens and closes.
+        sendMessage(exchangeID, MarketHoursRequestMsg());
     }
 
     /* For the sake of subclasses, TradingAgent now returns a boolean
@@ -111,99 +112,44 @@ bool TradingAgent::wakeup(const Timestamp currentTime) {
     return (mkt_open.isValid() and mkt_close.isValid()) and not mkt_closed;
 }
 
-void TradingAgent::requestDataSubscription(std::string symbol, const int levels, const int freq) {
-      sendMessage(recipientID = exchangeID,
-                  msg = Message({"msg": "MARKET_DATA_SUBSCRIPTION_REQUEST",
-                                 "sender": self.id, "symbol": symbol, "levels": levels, "freq": freq}));
+void TradingAgent::requestDataSubscription(MarketDataSubReqMsg subscription_message) {
+    subscription_message.cancel = false;
+
+    sendMessage(exchangeID, subscription_message);
 }
 
-void TradingAgent::cancelDataSubscription(std::string symbol) {
-    sendMessage(recipientID=exchangeID,
-                     msg=Message({"msg": "MARKET_DATA_SUBSCRIPTION_CANCELLATION",
-                                  "sender": self.id, "symbol": symbol}));
+void TradingAgent::cancelDataSubscription(MarketDataSubReqMsg subscription_message) {
+    subscription_message.cancel = true;
+
+    sendMessage(exchangeID, subscription_message);
 }
 
-void TradingAgent::receiveMessage(Timestamp currentTime, std::string msg) { }
-    // super().receiveMessage(currentTime, msg) // need to check that this actually just calls the function..
+void TradingAgent::receiveMessage(Timestamp currentTime, int sender_id, Message& message) { 
+    //FinancialAgent::receiveMessage(currentTime, sender_id, message); NEED TO DO
 
-    // // Do we know the market hours?
-    // bool had_mkt_hours = mkt_open is not none and mkt_close is not none;
+    // Do we know the market hours?
+    bool had_mkt_hours = mkt_open.isValid() and mkt_close.isValid();
 
-    // // Record market open or close times.
-    // if (msg.body["msg"] == "WHEN_MKT_OPEN")
-    //     mkt_open = msg.body["data"]
-    //     logger.log("Recorded market open: " + kernel->fmtTime(mkt_open));
+    // Record market open or close times.
+    if (const MarketHoursMsg* marketMsg = dynamic_cast<const MarketHoursMsg*>(&message)) {
+        mkt_open = marketMsg->mkt_open;
+        mkt_close = marketMsg->mkt_close;
 
-    // elif msg.body["msg"] == "WHEN_MKT_CLOSE":
-    //     mkt_close = msg.body["data"]
-    //     logger.log("Recorded market close: {}", self.kernel.fmtTime(self.mkt_close))
+        logger->log("Recorded market open: " + mkt_open.to_string());
+        logger->log("Recorded market close: " + mkt_close.to_string());
+    }
 
-    // elif msg.body['msg'] == "ORDER_EXECUTED":
-    //   # Call the orderExecuted method, which subclasses should extend.  This parent
-    //   # class could implement default "portfolio tracking" or "returns tracking"
-    //   # behavior.
-    //   order = msg.body['order']
+    else if (const MarketClosePriceMsg* marketMsg = dynamic_cast<const MarketClosePriceMsg*>(&message)) {
+        // Update the local pricing data to ensure accurate mark-to-market calculations.
+        for (const auto& pair : marketMsg->close_prices) {
+            const std::string& symbol = pair.first;
+            int close_price = pair.second;
 
-    //   self.orderExecuted(order)
+            last_trade[symbol] = close_price;
+        }
 
-    // elif msg.body['msg'] == "ORDER_ACCEPTED":
-    //   # Call the orderAccepted method, which subclasses should extend.
-    //   order = msg.body['order']
-
-    //   self.orderAccepted(order)
-
-    // elif msg.body['msg'] == "ORDER_CANCELLED":
-    //   # Call the orderCancelled method, which subclasses should extend.
-    //   order = msg.body['order']
-
-    //   self.orderCancelled(order)
-
-    // elif msg.body['msg'] == "MKT_CLOSED":
-    //   # We've tried to ask the exchange for something after it closed.  Remember this
-    //   # so we stop asking for things that can't happen.
-
-    //   self.marketClosed()
-
-    // elif msg.body['msg'] == 'QUERY_LAST_TRADE':
-    //   # Call the queryLastTrade method, which subclasses may extend.
-    //   # Also note if the market is closed.
-    //   if msg.body['mkt_closed']: self.mkt_closed = True
-
-    //   self.queryLastTrade(msg.body['symbol'], msg.body['data'])
-
-    // elif msg.body['msg'] == 'QUERY_SPREAD':
-    //   # Call the querySpread method, which subclasses may extend.
-    //   # Also note if the market is closed.
-    //   if msg.body['mkt_closed']: self.mkt_closed = True
-
-    //   self.querySpread(msg.body['symbol'], msg.body['data'], msg.body['bids'], msg.body['asks'], msg.body['book'])
-
-    // elif msg.body['msg'] == 'QUERY_ORDER_STREAM':
-    //   # Call the queryOrderStream method, which subclasses may extend.
-    //   # Also note if the market is closed.
-    //   if msg.body['mkt_closed']: self.mkt_closed = True
-
-    //   self.queryOrderStream(msg.body['symbol'], msg.body['orders'])
-
-    // elif msg.body['msg'] == 'QUERY_TRANSACTED_VOLUME':
-    //   if msg.body['mkt_closed']: self.mkt_closed = True
-    //   self.query_transacted_volume(msg.body['symbol'], msg.body['transacted_volume'])
-
-    // elif msg.body['msg'] == 'MARKET_DATA':
-    //   self.handleMarketData(msg)
-
-    // # Now do we know the market hours?
-    // have_mkt_hours = self.mkt_open is not None and self.mkt_close is not None
-
-    // # Once we know the market open and close times, schedule a wakeup call for market open.
-    // # Only do this once, when we first have both items.
-    // if have_mkt_hours and not had_mkt_hours:
-    //   # Agents are asked to generate a wake offset from the market open time.  We structure
-    //   # this as a subclass request so each agent can supply an appropriate offset relative
-    //   # to its trading frequency.
-    //   ns_offset = self.getWakeFrequency()
-
-    //   self.setWakeup(self.mkt_open + ns_offset)
+    }
+}
 
 
 std::string TradingAgent::fmtHoldings(const std::unordered_map<std::string, int>& holdings) {
@@ -228,7 +174,7 @@ std::string TradingAgent::fmtHoldings(const std::unordered_map<std::string, int>
     return oss.str();
 }
 
-int TradingAgent::markToMarket(std::unordered_map<std::string, int>& holdings, bool use_midpoint = false) {
+int TradingAgent::markToMarket(std::unordered_map<std::string, int>& holdings, bool use_midpoint) {
     auto cashIt = holdings.find("CASH");
     int cashValue = 0;
     if (cashIt != holdings.end()) {
@@ -254,7 +200,7 @@ int TradingAgent::markToMarket(std::unordered_map<std::string, int>& holdings, b
             int value = last_trade[symbol] * shares;
         }
         cash += value;
-        logger->log("MARK_TO_MARKET" + std::to_string(shares) + symbol + " @ "  + last_trade[symbol], + std::to_string(value));
+        logger->log("MARK_TO_MARKET" + std::to_string(shares) + symbol + " @ "  + std::to_string(last_trade[symbol]) + std::to_string(value));
     }
     return cash;
 }
@@ -264,4 +210,140 @@ std::tuple<int, int, int> TradingAgent::getKnownBidAskMidpoint(std::string symbo
     int ask = -1;
     int mid = -1;
     return std::make_tuple(bid, ask, mid);
+}
+
+std::tuple<int, int, int, int> TradingAgent::getKnownBidAsk(std::string symbol, bool best) {
+    if (best) {
+        if (known_bids.find(symbol) != known_bids.end()) {
+        const auto& inner_map = known_bids[symbol];
+        
+        if (!inner_map.empty()) {
+            // Access the most recent element using rbegin() (last element in std::map)
+            auto most_recent = inner_map.rbegin();  // Reverse iterator to the last element
+
+            return most_recent->second;
+            
+        } else {
+            std::cout << "No bids found for " << symbol << std::endl;
+            return std::make_tuple(-1,-1,-1,-1);
+        }
+    } else {
+        std::cout << "Symbol " << symbol << " not found in known_bids" << std::endl;
+        return std::make_tuple(-1,-1,-1,-1);
+    }
+    }
+    else {
+        std::cout << "ERROR NOT IMPLEMENTED NON-BEST BID/ASKS" << std::endl;
+        return std::make_tuple(-1,-1,-1,-1);
+    }
+}
+
+int TradingAgent::getHoldings(std::string symbol) {
+    auto it = holdings.find(symbol);
+    return it != holdings.end() ? it->second : 0;
+}
+
+void TradingAgent::getCurrentSpread(std::string symbol, int depth) {
+    sendMessage(exchangeID, QuerySpreadMsg(symbol, depth));
+}
+
+LimitOrder TradingAgent::createLimitOrder(
+    std::string symbol,
+    int quantity,
+    Side side,
+    int limit_price,
+    std::optional<int> order_id = std::nullopt,
+    bool is_hidden = false,
+    bool is_price_to_comply = false,
+    bool insert_by_id = false,
+    bool is_post_only = false,
+    bool ignore_risk = true
+) {
+    LimitOrder order(
+            id,
+            currentTime,
+            symbol,
+            quantity,
+            side,
+            limit_price,
+            is_hidden,
+            is_price_to_comply,
+            insert_by_id,
+            is_post_only,
+            order_id
+        );
+    
+    if (quantity > 0) {
+        // Test if this order can be permitted given our at-risk limits;
+        auto new_holdings = holdings;
+
+        int q = order.side.is_bid() ? order.quantity : -order.quantity;
+
+        if (new_holdings.find(order.symbol) != new_holdings.end()) {
+            new_holdings[order.symbol] += q;
+        }
+        else {
+            new_holdings[order.symbol] = q;
+        }
+
+        // If at_risk is lower, always allow. Otherwise, new_at_risk must be bellow starting cash.
+        if (!ignore_risk) {
+            // Compute before and after at-risk capital.
+            int at_risk = markToMarket(holdings) - holdings["CASH"];
+            int new_at_risk = markToMarket(new_holdings) - new_holdings["CASH"];
+
+            if (new_at_risk > at_risk && new_at_risk > starting_cash) {
+                std::ostringstream oss;
+                oss << "TradingAgent ignored limit order due to at-risk constraints: " << order << fmtHoldings(holdings);
+                logger->log(oss.str());
+                return LimitOrder();
+            }
+        }
+        return order;
+    }
+    else {
+        std::ostringstream oss;
+        oss << "TradingAgent ignored limit order of quantity zero: " << order;
+        logger->log(oss.str());
+        return LimitOrder();
+    }
+}
+
+
+void TradingAgent::placeLimitOrder(
+    std::string symbol,
+    int quantity,
+    Side side,
+    int limit_price,
+    int order_id,
+    bool is_hidden,
+    bool is_price_to_comply,
+    bool insert_by_id,
+    bool is_post_only,
+    bool ignore_risk
+    ) {
+    
+    LimitOrder order = createLimitOrder(
+            symbol,
+            quantity,
+            side,
+            limit_price,
+            order_id,
+            is_hidden,
+            is_price_to_comply,
+            insert_by_id,
+            is_post_only,
+            ignore_risk
+        );
+
+        if (order.order_id.has_value()) {
+            // Access the value of order_id and use it as the key
+            orders[order.order_id.value()] = order;
+
+            if (log_orders) {
+                std::ostringstream oss;
+                oss << order;
+                logEvent("ORDER_SUBMITTED", oss.str());
+            }
+        }
 }

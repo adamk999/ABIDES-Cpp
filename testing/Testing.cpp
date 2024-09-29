@@ -1,14 +1,40 @@
 #include <iostream>
-#include "../message/Message.h"
+#include "../util/timestamping.h"
+#include "../agents/TradingAgent.h"
+#include "../util/logger.h"
+#include "../Kernel.h"
+#include "../util/oracles/ExternalFileOracle.h"
+#include "../util/util.h"
+
 using namespace std;
 
 int main()
 {
-    Message m1("This is a test");
-    Message m2;
+    Logger log("logger.txt");
 
-    cout << m1.body << m1.uniq_id << endl;
-    cout << m2.uniq_id << endl;
+    
+    Kernel kernel("first_kernel", 1, log);
+
+    //std::vector<Agent> agents(1);
+    //gents[0] = Agent(10, "first_agent", "na", 30);
+    ExternalFileOracle oracle("AAPL", "data/AAPL.csv");
+
+    //kernel.runner(agents, 10, 11, 1, 1, 50, false, oracle, "/directory");
+
+    // Instantiate the current timestamp
+    Timestamp now = Timestamp::now();
+
+    TradingAgent TA(
+        1,
+        "First_Test",
+        "NA",
+        1,
+        log    
+    ); 
+
+    TA.kernelStarting(now);
+
+
 
     return 0;
 }

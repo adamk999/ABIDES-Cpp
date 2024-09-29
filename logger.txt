@@ -1,0 +1,14 @@
+At 2024-09-23 22:26:52 agent 1First_Test received wakeup.
+At 2024-09-23 22:26:55 agent 1First_Test received wakeup.
+At 2024-09-23 22:27:07 agent 1First_Test received wakeup.
+At 1970-01-01 01:00:00 agent 1First_Test received wakeup.
+At 2024-09-23 22:28:04 agent 1First_Test received wakeup.
+Kernel initialised.
+Kernel initialised.
+At 2024-09-23 22:30:17 agent 1First_Test received wakeup.
+Kernel initialised.
+At 2024-09-23 22:30:25 agent 1First_Test received wakeup.
+Kernel initialised.
+At 2024-09-23 22:31:04 agent 1First_Test received wakeup.
+Kernel initialised.
+Agent {} requested agent of type Agent.ExchangeAgent.  Given Agent ID: {}10

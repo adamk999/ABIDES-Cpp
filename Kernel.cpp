@@ -2,6 +2,7 @@
 #include "Kernel.h"
 #include "util/oracles/ExternalFileOracle.h"
 #include "util/util.h"
+#include "message/orders.h"
 #include <stdexcept>
 #include <algorithm>
 #include <sstream>
@@ -9,6 +10,8 @@
 
 // Initialise message static id var to 0.
 int Message::uniq = 0;
+
+int Order::order_id_counter = 0;
 
 Kernel::Kernel(const std::string& kernel_name, const int& random_state, Logger& logger) :
     kernel_name(kernel_name), random_state(random_state), logger(logger)
@@ -128,8 +131,12 @@ std::unordered_map<std::string, std::string> Kernel::runner(
 
         while (not messages.empty() and currentTime.isValid() and (currentTime <= stopTime)) {        
             // Get the next message in timestamp order (delivery time) and extract it.
-            Message msg = messages.top();
+            QueueEntry entry = messages.top();
             messages.pop();
+            const Message* msg = entry.msg;
+            int recipientId = entry.recipientId;
+            int senderId = entry.senderId;
+
 
             // Periodically print the simulation time and total messages, even if muted.
             if (ttl_messages % 100000 == 0)
@@ -141,8 +148,8 @@ std::unordered_map<std::string, std::string> Kernel::runner(
             }
             
             logger.log("\n--- Kernel Event Queue pop ---");
-            logger.log("Kernel handling " + std::to_string(msg.messageType) + " message for agent " 
-            + std::to_string(msg.sender) + " at time " + currentTime.to_string());
+            logger.log("Kernel handling " + msg->getName() + " message for agent " 
+            + std::to_string(recipientId) + " at time " + currentTime.to_string());
 
             ttl_messages ++;
             
@@ -151,63 +158,53 @@ std::unordered_map<std::string, std::string> Kernel::runner(
 
 
             // Dispatch message to agent.
-            if (msg.messageType == Message::MessageType::WAKEUP) {
-                // Who requested this wakeup call?
-                int agent = msg.sender;
+            if (const WakeupMsg* wakeupMsg = dynamic_cast<const WakeupMsg*>(msg)) {                    
                 
                 /* Test to see if the agent is already in the future.  If so,
                     delay the wakeup until the agent can act again. */
-                if (agentCurrentTimes[agent] > currentTime)
+                if (agentCurrentTimes[recipientId] > currentTime)
                 {
                     // Push the wakeup call back into th PQ with a new time.
-                    messages.push(Message(agentCurrentTimes[agent], agent, msg.messageType, msg.body));
-                    logger.log("Agent in future: wakeup requested for " + agentCurrentTimes[agent].to_string());
+                    messages.push(QueueEntry(agentCurrentTimes[recipientId], recipientId, recipientId, wakeupMsg));
+                    logger.log("Agent in future: wakeup requested for " + agentCurrentTimes[recipientId].to_string());
                     continue;
                 }
                 // Set agent's current time to global current time for start of processing.
-                agentCurrentTimes[agent] = currentTime;
+                agentCurrentTimes[recipientId] = currentTime;
 
                 // Wake the agent.
-                agents[agent].wakeup(currentTime);
+                agents[recipientId].wakeup(currentTime);
 
                 // Delay the agent by its computation delay plus any transient additional delay requested.
-                agentCurrentTimes[agent] += agentComputationDelays[agent] + currentAgentAdditionalDelay;
+                agentCurrentTimes[recipientId] += agentComputationDelays[recipientId] + currentAgentAdditionalDelay;
             
-                logger.log("After wakeup return, agent " + std::to_string(agent) + " delayed from " 
-                            + " to" + agentCurrentTimes[agent].to_string());
+                logger.log("After wakeup return, agent " + std::to_string(recipientId) + " delayed from " 
+                            + " to" + agentCurrentTimes[recipientId].to_string());
             }
 
-            else if (msg.messageType == Message::MessageType::MESSAGE) {
-                // Who is receiving this message?
-                int agent = msg.sender;
-
+            else {                    
                 // Test to see if the agent is already in the future. If so
                 // delay the message until the agent can act again.
-                if (agentCurrentTimes[agent] > currentTime)
-                {
+                if (agentCurrentTimes[recipientId] > currentTime) {
                     // Push the message back into the PQ with a new time.
-                    messages.push(Message(agentCurrentTimes[agent], agent, msg.messageType, msg.body));
-                    logger.log("Agent in future: message requed for " + agentCurrentTimes[agent].to_string());
+                    messages.push(QueueEntry(agentCurrentTimes[recipientId], senderId, recipientId, msg));
+                    logger.log("Agent in future: message requed for " + agentCurrentTimes[recipientId].to_string());
                     continue;
                 }
 
                 // Set agent's current time to global current time for start of processsing.
-                agentCurrentTimes[agent] = currentTime;
+                agentCurrentTimes[recipientId] = currentTime;
 
                 // Deliver the message.
-                agents[agent].receiveMessage(currentTime, msg.body);
+                agents[recipientId].receiveMessage(currentTime, senderId, msg);
 
                 // Delay the agent by its computation plus any transient additoinal delay requested.
-                agentCurrentTimes[agent] += agentComputationDelays[agent] + currentAgentAdditionalDelay;
+                agentCurrentTimes[recipientId] += agentComputationDelays[recipientId] + currentAgentAdditionalDelay;
 
-                logger.log("After receiveMessage return, agent " + std::to_string(agent) + " delayed from "
-                            + currentTime.to_string() + " to " + agentCurrentTimes[agent].to_string());
+                logger.log("After receiveMessage return, agent " + std::to_string(recipientId) + " delayed from "
+                            + currentTime.to_string() + " to " + agentCurrentTimes[recipientId].to_string());
             }
 
-            else {
-                throw std::runtime_error("Unknown message type found in queue: \n currentTime: " + currentTime.to_string() +
-                                    ", messageType: " + std::to_string(msg.messageType));
-            }
         }
         if (messages.empty()) { logger.log("\n--- Kernel Event Queue empty ---"); }
 
@@ -312,7 +309,8 @@ void Kernel::setWakeup(const int& sender, Timestamp requestedTime) {
     logger.log("Kernel adding wakeup for agent " + std::to_string(sender) + " at time " 
     + requestedTime.to_string());
 
-    messages.push(Message(requestedTime, sender, Message::WAKEUP, "NA"));
+    const WakeupMsg* msg; 
+    messages.push(QueueEntry(requestedTime, sender, sender, msg));
 }
 
 int Kernel::getAgentComputeDelay(const int& sender) {
@@ -330,29 +328,39 @@ void Kernel::setAgentComputeDelay(const int& sender, const int requestedDelay) {
     agentComputationDelays[sender] = requestedDelay;
 }
 
+void Kernel::appendSummaryLog(int id, std::string eventType, LogEntry e) {
+    // Implementation goes here (empty for now or left for future implementation)
+
+}
+
 void Kernel::writeSummaryLog() {
     std::cout << "Writing Summary Log" << std::endl;
 }
 
-int main()
-{
-
-    //Kernel kernel("first_kernel", 1);
-    //std::vector<Agent> agents(1);
-    //gents[0] = Agent(10, "first_agent", "na", 30);
-    ExternalFileOracle oracle("AAPL", "data/AAPL.csv");
-
-    //kernel.runner(agents, 10, 11, 1, 1, 50, false, oracle, "/directory");
-
-    // Instantiate the current timestamp
-    Timestamp now = Timestamp::now();
-
-    // Print the timestamp in a readable format
-    std::cout << "Current timestamp (string): " << now.to_string() << std::endl;
-
-    // Print the timestamp in nanoseconds since epoch
-    std::cout << "Current timestamp (nanoseconds since epoch): " << now.to_nanoseconds() << std::endl;
-
-    
+int Kernel::findAgentByType(std::string type) {
     return 0;
 }
+
+
+// int main()
+// {
+
+//     //Kernel kernel("first_kernel", 1);
+//     //std::vector<Agent> agents(1);
+//     //gents[0] = Agent(10, "first_agent", "na", 30);
+//     ExternalFileOracle oracle("AAPL", "data/AAPL.csv");
+
+//     //kernel.runner(agents, 10, 11, 1, 1, 50, false, oracle, "/directory");
+
+//     // Instantiate the current timestamp
+//     Timestamp now = Timestamp::now();
+
+//     // Print the timestamp in a readable format
+//     std::cout << "Current timestamp (string): " << now.to_string() << std::endl;
+
+//     // Print the timestamp in nanoseconds since epoch
+//     std::cout << "Current timestamp (nanoseconds since epoch): " << now.to_nanoseconds() << std::endl;
+
+    
+//     return 0;
+// }

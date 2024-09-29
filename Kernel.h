@@ -10,6 +10,23 @@
 class Agent;
 struct LogEntry;
 
+struct QueueEntry {
+
+    Timestamp ts;
+    int senderId;
+    int recipientId;
+    const Message* msg;
+    
+    QueueEntry(Timestamp& ts, int senderId, int recipientId, const Message* msg) 
+    : ts(ts), senderId(senderId), recipientId(recipientId), msg(msg) {}
+
+    // Define operator< for priority comparison
+    bool operator<(const QueueEntry& other) const {
+        // Compare based on timestamp; this will determine the order in the priority queue.
+        return ts < other.ts;
+    }
+};
+
 class Kernel
 {
 private:
@@ -32,7 +49,7 @@ private:
     void writeSummaryLog();
 
 public:
-    std::priority_queue<Message> messages;
+    std::priority_queue<QueueEntry> messages;
     std::string kernel_name;
     std::string summaryLog[1000];
     std::unordered_map<std::string, int> meanResultByAgentType;
